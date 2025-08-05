@@ -561,61 +561,56 @@ static inline void delay_until_iteration(uint64_t iteration) {
 static void load_stream_triad_nontemporal_injection_delay(per_thread_t *t) {
 #define LOOP_OPS 3
 #define LOOP_ALIGN 16
-    uint64_t load_loop, load_bites;
-    register uint64_t N, i;
-    register uint64_t *a;
-    register uint64_t *b;
-    register uint64_t *c;
-    register uint64_t *tmp;
-    const uint64_t num_elem_twocachelines = DEF_CACHELINE / sizeof(uint64_t) * 2;
+  uint64_t load_loop, load_bites;
+  register uint64_t N, i;
+  register uint64_t *a;
+  register uint64_t *b;
+  register uint64_t *c;
+  register uint64_t *tmp;
+  const uint64_t num_elem_twocachelines = DEF_CACHELINE / sizeof(uint64_t) * 2;
 
-    load_loop =
-            t->x.load_total_memory -
-            (LOOP_OPS * LOOP_ALIGN);  // subtract to allow aligning count/addresses
-    load_loop = (load_loop / LOOP_OPS) &
-                ~(LOOP_ALIGN - 1);  // divide by 3 buffers and align byte count on
-    // LOOP_ALIGN byte multiple
-    N = load_loop / sizeof(uint64_t);
-    load_bites = N * sizeof(uint64_t) * LOOP_OPS;
-    size_t aa = (((size_t)t->x.load_arena + LOOP_ALIGN) &
-                 ~(LOOP_ALIGN));  // align on 16 byte address
-    a = (uint64_t *)aa;
-    b = a + N;
-    c = b + N;
+  load_loop =
+      t->x.load_total_memory -
+      (LOOP_OPS * LOOP_ALIGN);  // subtract to allow aligning count/addresses
+  load_loop = (load_loop / LOOP_OPS) &
+              ~(LOOP_ALIGN - 1);  // divide by 3 buffers and align byte count on
+                                  // LOOP_ALIGN byte multiple
+  N = load_loop / sizeof(uint64_t);
+  load_bites = N * sizeof(uint64_t) * LOOP_OPS;
+  size_t aa = (((size_t)t->x.load_arena + LOOP_ALIGN) &
+               ~(LOOP_ALIGN));  // align on 16 byte address
+  a = (uint64_t *)aa;
+  b = a + N;
+  c = b + N;
 
-    if (verbosity > 1) {
-        printf(
-                "load_arena=%p, load_total_memory=0x%lX, load_loop=0x%lX, N=0x%lX, "
-                "a=%p, b=%p, c=%p\n",
-                (char *)t->x.load_arena, t->x.load_total_memory, load_loop, N, a, b, c);
-    }
+  if (verbosity > 1) {
+    printf(
+        "load_arena=%p, load_total_memory=0x%lX, load_loop=0x%lX, N=0x%lX, "
+        "a=%p, b=%p, c=%p\n",
+        (char *)t->x.load_arena, t->x.load_total_memory, load_loop, N, a, b, c);
+  }
 
-    LOAD_MEMORY_INIT_MIBPS
-    do {
-        tmp = a;
-        a = b;
-        b = c;
-        c = tmp;
+  LOAD_MEMORY_INIT_MIBPS
+  do {
+    tmp = a;
+    a = b;
+    b = c;
+    c = tmp;
 
-        for (i = 0; i < N; i += 4) {
-            if (i % num_elem_twocachelines == 0) delay_until_iteration(t->x.delay);
+    for (i = 0; i < N; i += 2) {
+      if (i % num_elem_twocachelines == 0) delay_until_iteration(t->x.delay);
 #if defined(__aarch64__)
-            asm volatile ("stnp %0, %1, [%2]" :: "r"(b[i]+c[i]), "r"(b[i+1]+c[i+1]), "r" (a+i));
-      asm volatile ("stnp %0, %1, [%2]" :: "r"(b[i+2]+c[i+2]), "r"(b[i+3]+c[i+3]), "r" (a+i+2));
+      asm volatile ("stnp %0, %1, [%2]" :: "r"(b[i]+c[i]), "r"(b[i+1]+c[i+1]), "r" (a+i));
 #elif defined(__x86_64__)
-            _mm_stream_si64(&((long long*)a)[i], b[i]+c[i]);
+      _mm_stream_si64(&((long long*)a)[i], b[i]+c[i]);
       _mm_stream_si64(&((long long*)a)[i+1], b[i+1]+c[i+1]);
-      _mm_stream_si64(&((long long*)a)[i+2], b[i+2]+c[i+2]);
-      _mm_stream_si64(&((long long*)a)[i+3], b[i+3]+c[i+3]);
 #else
-            a[i] = b[i] + c[i];
-            a[i+1] = b[i+1] + c[i+1];
-            a[i+2] = b[i+2] + c[i+2];
-            a[i+3] = b[i+3] + c[i+3];
+      a[i] = b[i] + c[i];
+      a[i+1] = b[i+1] + c[i+1];
 #endif
-        }
-        LOAD_MEMORY_SAMPLE_MIBPS
-    } while (1);
+    }
+    LOAD_MEMORY_SAMPLE_MIBPS
+  } while (1);
 #undef LOOP_OPS
 #undef LOOP_ALIGN
 }
