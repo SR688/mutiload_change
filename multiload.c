@@ -638,6 +638,53 @@ static void load_stream_copy(per_thread_t *t) {
   } while (1);
 #undef LOOP_OPS
 }
+//--------------------------------------------------------------------------------------------------------
+static void load_stream_triad_3to1(per_thread_t *t) {
+#define LOOP_OPS 4  // 3个读取 + 1个写入
+#define LOOP_ALIGN 16
+    uint64_t load_loop, load_bites;
+    register uint64_t N, i;
+    register double *a, *b, *c, *d;
+    register double *tmp;
+
+    // 调整循环数据量以满足对齐和内存分配要求
+    load_loop = t->x.load_total_memory - (LOOP_OPS * LOOP_ALIGN);
+    load_loop = (load_loop / LOOP_OPS) & ~(LOOP_ALIGN - 1);
+    N = load_loop / sizeof(double);
+    load_bites = N * sizeof(double) * LOOP_OPS;
+
+    // 分配四段对齐内存
+    size_t aa = (((size_t)t->x.load_arena + LOOP_ALIGN) & ~(LOOP_ALIGN));
+    a = (double *)aa;
+    b = a + N;
+    c = b + N;
+    d = c + N;
+
+    if (verbosity > 1) {
+        printf("load_arena=%p, load_total_memory=0x%lX, load_loop=0x%lX, N=0x%lX, a=%p, b=%p, c=%p, d=%p\n",
+               (char *)t->x.load_arena, t->x.load_total_memory, load_loop, N, a, b, c, d);
+    }
+
+    LOAD_MEMORY_INIT_MIBPS
+    do {
+        // 轮换地址，以确保不同轮次使用不同内存位置
+        tmp = a;
+        a = b;
+        b = c;
+        c = d;
+        d = tmp;
+
+        // 执行读写：3次读取（a, b, c），1次写入（d）
+        for (i = 0; i < N; ++i) {
+            d[i] = a[i] + b[i] + c[i];
+        }
+
+        LOAD_MEMORY_SAMPLE_MIBPS
+    } while (1);
+
+#undef LOOP_OPS
+#undef LOOP_ALIGN
+}
 
 //--------------------------------------------------------------------------------------------------------
 static void load_stream_sum(per_thread_t *t) {
@@ -675,8 +722,8 @@ static const chase_t memloads[] = {
     {
         .fn = load_memset_libc,
         .base_object_size = sizeof(void *),
-        .name = "memset-libc",
-        .usage1 = "memset-libc",
+        .name = "Full-write-bandwidth",
+        .usage1 = "Full-write-bandwidth",
         .usage2 = "0:1 rd:wr - memset() non-zero data",
         .requires_arg = 0,
         .parallelism = 0,
@@ -693,8 +740,8 @@ static const chase_t memloads[] = {
     {
         .fn = load_stream_copy,
         .base_object_size = sizeof(void *),
-        .name = "stream-copy",
-        .usage1 = "stream-copy",
+        .name = "Read-write-1-1-bandwidth",
+        .usage1 = "Read-write-1-1-bandwidth",
         .usage2 = "1:1 rd:wr - lmbench stream copy ",
         .requires_arg = 0,
         .parallelism = 0,
@@ -702,8 +749,8 @@ static const chase_t memloads[] = {
     {
         .fn = load_stream_sum,
         .base_object_size = sizeof(void *),
-        .name = "stream-sum",
-        .usage1 = "stream-sum",
+        .name = "Full-read-bandwidth",
+        .usage1 = "Full-read-bandwidth",
         .usage2 = "1:0 rd:wr - lmbench stream sum ",
         .requires_arg = 0,
         .parallelism = 0,
@@ -711,11 +758,20 @@ static const chase_t memloads[] = {
     {
         .fn = load_stream_triad,
         .base_object_size = sizeof(void *),
-        .name = "stream-triad",
-        .usage1 = "stream-triad",
+        .name = "Read-write-2-1-bandwidth",
+        .usage1 = "Read-write-2-1-bandwidth",
         .usage2 = "2:1 rd:wr - lmbench stream triad a[i]=b[i]+(scalar*c[i])",
         .requires_arg = 0,
         .parallelism = 0,
+    },
+    {
+            .fn = load_stream_triad_3to1,
+            .base_object_size = sizeof(void *),
+            .name = "Read-write-3-1-bandwidth",
+            .usage1 = "Read-write-3-1-bandwidth",
+            .usage2 = "3:1 rd:wr - lmbench stream triad a[i]=b[i]+(scalar*c[i])",
+            .requires_arg = 0,
+            .parallelism = 0,
     },
     {
         .fn = load_stream_triad_nontemporal_injection_delay,
